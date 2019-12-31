@@ -5,53 +5,55 @@ import cv2
 
 import model, utils
 
-### TODO:
-### Add Comments
-### Make github code nice
-
 tf.enable_eager_execution()
-tf.logging.set_verbosity(tf.logging.ERROR)
 
-### load_training_data loads the mnist training data consisting of
-###     handwritten digits and labels giving their value.
-### Dimensions of returned train_images is 60000 x 28 x 28 x 1
-### Dimensions of returned train_labels is 60000 x 10
+BATCH_SIZE = 50
+LAMBDA = 10
+EPOCHS = 20
+
+
+### Loads the mnist training set to train the critic and the corresponding
+###	random seed values necessary to train generator
 def load_training_data():
 
 	(train_images, _), (_, _) = tf.keras.datasets.mnist.load_data()
+
+	# Normalize values between -1 and 1
 	train_images = utils.mnist_normalize(train_images.astype(float))
 	train_images = tf.cast(np.reshape(train_images, (-1, 28, 28, 1)), dtype=tf.float32)
 
+	# Generate 60000 batches of length 100 random vectors with values between -1 and 1
 	seeds = tf.cast(2 * np.random.rand(60000, 100) - 1, dtype=tf.float32)
 
-	dataset = tf.data.Dataset.from_tensor_slices((train_images, seeds)).shuffle(100000).batch(50)
+	dataset = tf.data.Dataset.from_tensor_slices((train_images, seeds)).shuffle(100000).batch(BATCH_SIZE)
 
 	return dataset
 
+### Wasserstein GAN generator loss function
 def generator_loss(generator, critic, seed):
 	return tf.math.negative(tf.keras.backend.sum(critic(generator(seed))))
 
+### Wasserstein GAN critic loss function
 def critic_loss(generator, critic, seed, reals):
-	batch_size = np.shape(seed)[0]
-	line_epsilon = np.random.rand(batch_size)
+
 	fakes = generator(seed)
 
+	# Sample uniformly along straight lines between pairs of points from data
+	# distribution and generator distribution
 	differences = fakes - reals
 	alpha = np.random.rand(*np.shape(differences))
 	interpolates = reals + alpha * differences
 
+	# Calculate gradient penalty
 	with tf.GradientTape() as gen_tape:
 		estimate = critic(interpolates)
 	gradients = gen_tape.gradient(estimate, critic.variables)[0]
-
 	slopes = tf.sqrt(tf.reduce_sum(tf.square(gradients), reduction_indices=[1]))
 	gradient_penalty = tf.reduce_mean((slopes-1.)**2)
 
-	lda = 10
-	penalty = lda * gradient_penalty
+	return tf.math.reduce_sum(critic(fakes)) - tf.math.reduce_sum(critic(reals)) + LAMBDA*gradient_penalty
 
-	return tf.math.reduce_sum(critic(fakes)) - tf.math.reduce_sum(critic(reals)) + penalty
-
+### Used to train the generator one step
 def generator_train_step(generator, critic, opt, seed):
 
 	with tf.GradientTape() as gen_tape:
@@ -62,6 +64,7 @@ def generator_train_step(generator, critic, opt, seed):
 
 	return loss
 
+### Used to train the critic one step
 def critic_train_step(generator, critic, opt, reals, seed):
 
 	with tf.GradientTape() as gen_tape:
@@ -83,18 +86,16 @@ def main():
 	checkpoint_prefix, manager, checkpoint = utils.make_checkpoint(generator, critic)
 	checkpoint.restore(tf.train.latest_checkpoint(checkpoint_prefix))
 
-	sample_seed = tf.cast(np.random.rand(1, 100), dtype=tf.float32)
-
-	epochs = 1000
 	sample_counter = 1
 
-	for _ in range(0, epochs):
+	for _ in range(0, EPOCHS):
 		dataset = load_training_data()
 		dataset_iter = dataset.__iter__()
 		critic_loss = 0.0
 
 		for sample in dataset_iter:
 			images, seeds = sample
+			# Train the generator every fifth step
 			if sample_counter % 5 == 0:
 				generator_train_step(generator, critic, gen_opt, seeds)
 				print("Loss: ", critic_loss / 5)

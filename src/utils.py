@@ -3,7 +3,6 @@ import tensorflow as tf
 import numpy as np
 import os, cv2
 
-## GIF/IMage Making Here!
 
 def make_checkpoint(generator, critic):
 	checkpoint_prefix = '../training_checkpoints'
@@ -21,6 +20,7 @@ def save_tensor_as_png(tensor, version):
     img = np.reshape(img, (28, 28)).astype(int)
     cv2.imwrite("../generated_images/" + str(version) + '.png', img)
 
+### Normalize pixel values to (-1, 1)
 def mnist_normalize(tensor):
     return (tensor - 128) / 128
 
